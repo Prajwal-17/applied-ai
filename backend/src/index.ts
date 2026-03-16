@@ -188,21 +188,86 @@ app.post("/api/raw/chat", async (req: Request, res: Response) => {
 });
 
 app.post("/api/openrouter/chat", async (req: Request, res: Response) => {
+  res.setHeader("Content-type", "text/event-stream");
+  res.setHeader("Cache-control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
   try {
+    const { chatId, prompt } = req.body;
+
+    let newChatId;
+    if (!chatId) {
+      const response = await fetch(
+        "https://openrouter.ai/api/v1/chat/completions",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${process.env.OPENROUTER_KEY}`,
+            // "HTTP-Referer": "<YOUR_SITE_URL>", // Optional. Site URL for rankings on openrouter.ai.
+            // "X-OpenRouter-Title": "<YOUR_SITE_NAME>", // Optional. Site title for rankings on openrouter.ai.
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "x-ai/grok-4.1-fast",
+            messages: [
+              {
+                role: "system",
+                content:
+                  "Generate a concise title for the user given prompt. Provide only the title for this prompt not any explanation or qutotes",
+              },
+              {
+                role: "user",
+                content: prompt,
+              },
+            ],
+          }),
+        },
+      );
+      const newTitle = await response.json();
+
+      const newChat = await prisma.chats.create({
+        data: {
+          title: newTitle.choices[0].message.content,
+        },
+      });
+
+      if (!newChat.id) {
+        return res.json({ msg: "New Chat could not create" }).status(500);
+      }
+      newChatId = newChat.id;
+    }
+
+    const activeChatId = chatId || newChatId;
+
+    const prevMessages = await prisma.messages.findMany({
+      where: {
+        chatId: activeChatId,
+      },
+      select: {
+        role: true,
+        content: true,
+      },
+      orderBy: {
+        msgIndex: "asc",
+      },
+    });
+
     const response = await fetch(
       "https://openrouter.ai/api/v1/chat/completions",
       {
         method: "POST",
         headers: {
           Authorization: `Bearer ${process.env.OPENROUTER_KEY}`,
-          "Content-type": "application/json",
+          // "HTTP-Referer": "<YOUR_SITE_URL>", // Optional. Site URL for rankings on openrouter.ai.
+          // "X-OpenRouter-Title": "<YOUR_SITE_NAME>", // Optional. Site title for rankings on openrouter.ai.
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           model: "x-ai/grok-4.1-fast",
           messages: [
+            ...prevMessages,
             {
               role: "user",
-              content: "What is the meaning of life",
+              content: prompt,
             },
           ],
           stream: true,
@@ -210,8 +275,46 @@ app.post("/api/openrouter/chat", async (req: Request, res: Response) => {
       },
     );
 
-    console.log(response);
-    // read the stream and serve to FE
+    const reader = response.body?.getReader();
+    console.log(reader);
+    if (!reader) {
+      throw new Error("Response body is not readable");
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      while (true) {
+        const lineEnd = buffer.indexOf("\n");
+        if (lineEnd === -1) break;
+        const line = buffer.slice(0, lineEnd).trim();
+        buffer = buffer.slice(lineEnd + 1);
+        if (line.startsWith("data: ")) {
+          const data = line.slice(6);
+          if (data === "[DONE]") break;
+          try {
+            const parsed = JSON.parse(data);
+            const content = parsed.choices[0].delta.content;
+            if (content) {
+              // console.log(content);
+              res.write(`data:${JSON.stringify({ content })}\n\n`);
+            }
+          } catch (e) {
+            console.log("errr", e);
+            // Ignore invalid JSON
+          }
+        }
+      }
+    }
+
+    res.write(`data:[DONE]\n\n`);
+    res.end();
   } catch (error) {
     console.log(error);
     return res.status(500);
