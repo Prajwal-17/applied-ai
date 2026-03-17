@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { FaPlus } from "react-icons/fa6";
 import {
   LuLoader,
   LuMessageSquare as MessageIcon,
@@ -33,6 +34,8 @@ export const RawChat = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [chatId, setChatId] = useState<string | null>(null);
   const [titles, setTitles] = useState<Title[]>([]);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [selectedModel, setSelectedModel] = useState("gemini");
 
   const handleSendMsg = async () => {
     if (!promptInput.trim() || loading) return;
@@ -53,17 +56,20 @@ export const RawChat = () => {
         },
       ]);
 
-      const response = await fetch("http://localhost:3000/api/raw/chat", {
-        method: "POST",
-        headers: {
-          Accept: "text/event-stream",
-          "Content-type": "application/json",
+      const response = await fetch(
+        `http://localhost:3000/api/chat/${selectedModel}`,
+        {
+          method: "POST",
+          headers: {
+            Accept: "text/event-stream",
+            "Content-type": "application/json",
+          },
+          body: JSON.stringify({
+            id: chatId,
+            prompt: currentPrompt,
+          }),
         },
-        body: JSON.stringify({
-          id: chatId,
-          prompt: currentPrompt,
-        }),
-      });
+      );
 
       if (!response.ok) {
         throw new Error("Something went wrong");
@@ -208,7 +214,48 @@ export const RawChat = () => {
 
         <div className="w-full shrink-0 bg-linear-to-t from-[#212121] via-[#212121] to-transparent px-4 pt-4 pb-6 md:px-0">
           <div className="relative mx-auto w-full max-w-3xl">
-            <div className="relative flex w-full items-end gap-2 rounded-3xl bg-[#2f2f2f] p-2 pr-3 shadow-[0_0_15px_rgba(0,0,0,0.1)] ring-1 ring-white/10 transition-all focus-within:ring-white/30">
+            <div className="relative flex w-full items-center gap-2 rounded-3xl bg-[#2f2f2f] p-2 pr-3 shadow-[0_0_15px_rgba(0,0,0,0.1)] ring-1 ring-white/10 transition-all focus-within:ring-white/30">
+              <div className="relative ml-2 flex items-center">
+                <button
+                  type="button"
+                  onClick={() => setShowDropdown(!showDropdown)}
+                  className="flex h-10 w-10 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-[#404040] hover:text-white"
+                >
+                  <FaPlus />
+                </button>
+
+                {showDropdown && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-10"
+                      onClick={() => setShowDropdown(false)}
+                    />
+                    <div className="absolute bottom-full left-0 z-20 mb-2 w-48 rounded-xl bg-[#2f2f2f] p-2 shadow-lg ring-1 ring-white/10">
+                      <div className="px-2 pb-2 text-xs font-semibold text-gray-500">
+                        Models
+                      </div>
+                      <button
+                        onClick={() => {
+                          setSelectedModel("gemini");
+                          setShowDropdown(false);
+                        }}
+                        className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-[#404040] ${selectedModel === "gemini" ? "bg-[#404040] text-white" : "text-gray-300"}`}
+                      >
+                        Raw Api (Gemini)
+                      </button>
+                      <button
+                        onClick={() => {
+                          setSelectedModel("openrouter");
+                          setShowDropdown(false);
+                        }}
+                        className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-[#404040] ${selectedModel === "openrouter" ? "bg-[#404040] text-white" : "text-gray-300"}`}
+                      >
+                        Open Router
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
               <textarea
                 rows={1}
                 style={{ minHeight: "44px", maxHeight: "200px" }}

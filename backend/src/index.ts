@@ -111,7 +111,7 @@ app.get("/api/chat/:id", async (req: Request, res: Response) => {
 });
 
 // raw apis - gemini
-app.post("/api/raw/chat", async (req: Request, res: Response) => {
+app.post("/api/chat/gemini", async (req: Request, res: Response) => {
   res.setHeader("Content-type", "text/event-stream");
   res.setHeader("Cache-control", "no-cache");
   res.setHeader("Connection", "keep-alive");
@@ -257,23 +257,20 @@ app.post("/api/raw/chat", async (req: Request, res: Response) => {
   }
 });
 
-app.post("/api/openrouter/chat", async (req: Request, res: Response) => {
+app.post("/api/chat/openrouter", async (req: Request, res: Response) => {
   res.setHeader("Content-type", "text/event-stream");
   res.setHeader("Cache-control", "no-cache");
   res.setHeader("Connection", "keep-alive");
   try {
-    const { chatId, prompt } = req.body;
+    const { id, prompt } = req.body;
 
-    let newChatId;
-    if (!chatId) {
-      const response = await fetch(
+    if (!id) {
+      const titleResponse = await fetch(
         "https://openrouter.ai/api/v1/chat/completions",
         {
           method: "POST",
           headers: {
             Authorization: `Bearer ${process.env.OPENROUTER_KEY}`,
-            // "HTTP-Referer": "<YOUR_SITE_URL>", // Optional. Site URL for rankings on openrouter.ai.
-            // "X-OpenRouter-Title": "<YOUR_SITE_NAME>", // Optional. Site title for rankings on openrouter.ai.
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
@@ -292,25 +289,128 @@ app.post("/api/openrouter/chat", async (req: Request, res: Response) => {
           }),
         },
       );
-      const newTitle = await response.json();
+      const titleData = await titleResponse.json();
+      const newTitleText =
+        titleData.choices?.[0]?.message?.content || prompt.slice(0, 30);
 
-      const newChat = await prisma.chats.create({
+      const chat = await prisma.chats.create({
         data: {
-          title: newTitle.choices[0].message.content,
+          title: newTitleText,
         },
       });
 
-      if (!newChat.id) {
+      if (!chat.id) {
         return res.json({ msg: "New Chat could not create" }).status(500);
       }
-      newChatId = newChat.id;
+
+      const latestMsgIndex = await prisma.messages.findFirst({
+        where: {
+          id: chat.id,
+        },
+        orderBy: {
+          msgIndex: "desc",
+        },
+        select: { msgIndex: true },
+      });
+
+      const newMsgIndex = latestMsgIndex?.msgIndex
+        ? latestMsgIndex?.msgIndex + 1
+        : 1;
+
+      await prisma.messages.create({
+        data: {
+          role: "USER",
+          msgIndex: newMsgIndex,
+          chatId: chat.id,
+          content: prompt,
+        },
+      });
+
+      let aiResponse = "";
+
+      const response = await fetch(
+        "https://openrouter.ai/api/v1/chat/completions",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${process.env.OPENROUTER_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "x-ai/grok-4.1-fast",
+            messages: [
+              {
+                role: "user",
+                content: prompt,
+              },
+            ],
+            stream: true,
+          }),
+        },
+      );
+
+      const reader = response.body?.getReader();
+
+      if (!reader) {
+        throw new Error("Response body is not readable");
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            const data = line.slice(6).trim();
+            if (data === "[DONE]") continue;
+            try {
+              const parsed = JSON.parse(data);
+              const content = parsed.choices?.[0]?.delta?.content;
+              if (content) {
+                aiResponse += content;
+                res.write(`data:${JSON.stringify({ text: content })}\n\n`);
+              }
+            } catch (e) {
+              // Ignore invalid JSON
+            }
+          }
+        }
+      }
+
+      await prisma.messages.create({
+        data: {
+          chatId: chat.id,
+          role: "AI",
+          msgIndex: newMsgIndex + 1,
+          content: aiResponse,
+        },
+      });
+
+      res.write(`data:[DONE]\n\n`);
+      res.end();
+      return;
     }
 
-    const activeChatId = chatId || newChatId;
+    const existingChat = await prisma.chats.findFirst({
+      where: {
+        id: id,
+      },
+    });
+
+    if (!existingChat?.id) {
+      return res.json({ msg: `Chat does not exist:${id}` }).status(400);
+    }
 
     const prevMessages = await prisma.messages.findMany({
       where: {
-        chatId: activeChatId,
+        chatId: existingChat.id,
       },
       select: {
         role: true,
@@ -321,20 +421,48 @@ app.post("/api/openrouter/chat", async (req: Request, res: Response) => {
       },
     });
 
+    const openRouterMessages = prevMessages.map((msg) => ({
+      role: msg.role === "USER" ? "user" : "assistant",
+      content: msg.content,
+    }));
+
+    const latestMsgIndex = await prisma.messages.findFirst({
+      where: {
+        chatId: existingChat.id,
+      },
+      orderBy: {
+        msgIndex: "desc",
+      },
+      select: { msgIndex: true },
+    });
+
+    const newMsgIndex = latestMsgIndex?.msgIndex
+      ? latestMsgIndex?.msgIndex + 1
+      : 1;
+
+    await prisma.messages.create({
+      data: {
+        role: "USER",
+        msgIndex: newMsgIndex,
+        chatId: existingChat.id,
+        content: prompt,
+      },
+    });
+
+    let aiResponse = "";
+
     const response = await fetch(
       "https://openrouter.ai/api/v1/chat/completions",
       {
         method: "POST",
         headers: {
           Authorization: `Bearer ${process.env.OPENROUTER_KEY}`,
-          // "HTTP-Referer": "<YOUR_SITE_URL>", // Optional. Site URL for rankings on openrouter.ai.
-          // "X-OpenRouter-Title": "<YOUR_SITE_NAME>", // Optional. Site title for rankings on openrouter.ai.
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
           model: "x-ai/grok-4.1-fast",
           messages: [
-            ...prevMessages,
+            ...openRouterMessages,
             {
               role: "user",
               content: prompt,
@@ -346,7 +474,7 @@ app.post("/api/openrouter/chat", async (req: Request, res: Response) => {
     );
 
     const reader = response.body?.getReader();
-    console.log(reader);
+
     if (!reader) {
       throw new Error("Response body is not readable");
     }
@@ -359,35 +487,41 @@ app.post("/api/openrouter/chat", async (req: Request, res: Response) => {
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
 
-      while (true) {
-        const lineEnd = buffer.indexOf("\n");
-        if (lineEnd === -1) break;
-        const line = buffer.slice(0, lineEnd).trim();
-        buffer = buffer.slice(lineEnd + 1);
+      for (const line of lines) {
         if (line.startsWith("data: ")) {
-          const data = line.slice(6);
-          if (data === "[DONE]") break;
+          const data = line.slice(6).trim();
+          if (data === "[DONE]") continue;
           try {
             const parsed = JSON.parse(data);
-            const content = parsed.choices[0].delta.content;
+            const content = parsed.choices?.[0]?.delta?.content;
             if (content) {
-              // console.log(content);
-              res.write(`data:${JSON.stringify({ content })}\n\n`);
+              aiResponse += content;
+              res.write(`data:${JSON.stringify({ text: content })}\n\n`);
             }
           } catch (e) {
-            console.log("errr", e);
             // Ignore invalid JSON
           }
         }
       }
     }
 
+    await prisma.messages.create({
+      data: {
+        chatId: existingChat.id,
+        role: "AI",
+        msgIndex: newMsgIndex + 1,
+        content: aiResponse,
+      },
+    });
+
     res.write(`data:[DONE]\n\n`);
     res.end();
   } catch (error) {
-    console.log(error);
-    return res.status(500);
+    console.log((error as Error).message);
+    res.status(400).end();
   }
 });
 

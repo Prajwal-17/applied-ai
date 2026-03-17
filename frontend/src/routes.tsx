@@ -3,7 +3,6 @@ import App from "./App";
 import { AiSDK } from "./pages/AiSDK";
 import { Demo } from "./pages/Demo";
 import { Home } from "./pages/Home";
-import { OpenRouterChat } from "./pages/OpenRouterChat";
 import { RawChat } from "./pages/RawChat";
 import { Response } from "./pages/Response";
 
@@ -25,12 +24,8 @@ export const router = createBrowserRouter([
         element: <Response />,
       },
       {
-        path: "/raw/chat",
+        path: "/chat",
         element: <RawChat />,
-      },
-      {
-        path: "/openrouter/chat",
-        element: <OpenRouterChat />,
       },
       {
         path: "/aisdk/chat",
