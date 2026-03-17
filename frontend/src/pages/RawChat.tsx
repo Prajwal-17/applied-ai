@@ -1,5 +1,13 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import {
+  LuLoader,
+  LuMessageSquare as MessageIcon,
+  LuPlus as PlusIcon,
+  LuSend as SendIcon,
+  LuSparkles as SparklesIcon,
+} from "react-icons/lu";
 import Markdown from "react-markdown";
+import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 
 type Message = {
@@ -15,6 +23,10 @@ type Title = {
   title: string;
 };
 
+const LoadingSpinner = () => (
+  <LuLoader className="h-5 w-5 animate-spin text-gray-500" />
+);
+
 export const RawChat = () => {
   const [promptInput, setPromptInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -23,16 +35,21 @@ export const RawChat = () => {
   const [titles, setTitles] = useState<Title[]>([]);
 
   const handleSendMsg = async () => {
+    if (!promptInput.trim() || loading) return;
+
+    const currentPrompt = promptInput;
+    setPromptInput("");
+    setLoading(true);
+
     try {
-      setLoading(true);
       setMessages((prev) => [
         ...prev,
         {
           id: "",
           chatId: "",
-          msgIndex: messages.length + 1,
+          msgIndex: prev.length + 1,
           role: "USER",
-          content: promptInput,
+          content: currentPrompt,
         },
       ]);
 
@@ -44,10 +61,9 @@ export const RawChat = () => {
         },
         body: JSON.stringify({
           id: chatId,
-          prompt: promptInput,
+          prompt: currentPrompt,
         }),
       });
-      setPromptInput("");
 
       if (!response.ok) {
         throw new Error("Something went wrong");
@@ -57,14 +73,12 @@ export const RawChat = () => {
         throw new Error("Response has no body");
       }
 
-      const aiMessageIndex = messages.length + 2;
-
       setMessages((prev) => [
         ...prev,
         {
           id: "",
           chatId: "",
-          msgIndex: aiMessageIndex,
+          msgIndex: prev.length + 1,
           role: "AI",
           content: "",
         },
@@ -77,20 +91,14 @@ export const RawChat = () => {
 
       while (true) {
         const { done, value } = await reader.read();
-        // here value is the utf values
 
         if (done) break;
-        // console.log(value);
 
-        // decode returns string
         const chunk = decoder.decode(value, { stream: true });
-        // console.log(chunk);
-
-        // split returns array of lines
         const lines = chunk.split("\n");
 
         for (const line of lines) {
-          const jsonStr = line.replace("data:", "");
+          const jsonStr = line.replace("data:", "").trim();
 
           if (jsonStr === "[DONE]") break;
 
@@ -99,8 +107,6 @@ export const RawChat = () => {
               continue;
             }
             const data = JSON.parse(jsonStr);
-            // console.log(data);
-
             const newText = data.text;
 
             aiResponse += newText;
@@ -112,24 +118,14 @@ export const RawChat = () => {
               ),
             );
           } catch (error) {
-            console.log(error);
+            console.log("Error parsing JSON string:", jsonStr, error);
           }
         }
       }
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: "",
-          chatId: "",
-          msgIndex: messages.length + 1,
-          role: "AI",
-          content: aiResponse,
-        },
-      ]);
       setLoading(false);
     } catch (error) {
       console.log(error);
+      setLoading(false);
     }
   };
 
@@ -140,12 +136,16 @@ export const RawChat = () => {
 
   useEffect(() => {
     async function getChatTitles() {
-      const response = await fetch("http://localhost:3000/api/chats", {
-        method: "GET",
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setTitles(data.titles);
+      try {
+        const response = await fetch("http://localhost:3000/api/chats", {
+          method: "GET",
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setTitles(data.titles);
+        }
+      } catch (error) {
+        console.log("Failed to fetch chat titles", error);
       }
     }
 
@@ -153,65 +153,96 @@ export const RawChat = () => {
   }, []);
 
   return (
-    <>
-      <div className="flex h-screen w-full flex-col bg-black px-4 py-4 text-white">
-        <h1 className="mb-4 text-4xl font-semibold">Ai chat app</h1>
-        <div>
-          {titles.map((item, idx) => (
-            <div
-              key={idx}
-              onClick={() => {
-                setChatId(item.id);
-              }}
-              className="group space-x-2"
-            >
-              <span> =&gt; </span>
-              <span className="cursor-pointer group-hover:underline">
-                {item.title}
-              </span>
-            </div>
-          ))}
+    <div className="flex h-screen w-full bg-[#212121] font-sans text-gray-100 selection:bg-white/20">
+      <div className="hidden w-64 shrink-0 flex-col border-r border-white/10 bg-[#171717] transition-all duration-300 md:flex">
+        <div className="p-3">
+          <button
+            onClick={handleCreateNew}
+            className="flex w-full items-center gap-3 rounded-lg border border-white/20 bg-transparent p-3 text-sm font-medium transition-colors hover:border-white/40 hover:bg-[#2A2B32]"
+          >
+            <PlusIcon />
+            New Chat
+          </button>
         </div>
 
-        <div className="flex flex-1 flex-col items-center justify-center overflow-hidden">
-          <div className="relative flex h-full w-full max-w-3xl flex-col">
-            <Chat
-              chatId={chatId}
-              messages={messages}
-              setMessages={setMessages}
-            />
-            <div>
+        <div className="custom-scrollbar mt-4 flex-1 overflow-x-hidden overflow-y-auto p-3 pt-0">
+          <div className="mb-3 px-2 text-xs font-semibold text-gray-500">
+            Recent Chats
+          </div>
+          <div className="flex flex-col gap-1">
+            {titles.map((item, idx) => (
               <button
-                onClick={handleCreateNew}
-                className="rounded-xl bg-gray-900 px-4 py-2 text-white hover:cursor-pointer hover:bg-gray-800"
+                key={idx}
+                onClick={() => setChatId(item.id)}
+                className={`flex items-center gap-3 rounded-lg p-3 text-left text-sm transition-colors ${
+                  chatId === item.id
+                    ? "bg-[#2A2B32] text-white"
+                    : "text-gray-300 hover:bg-[#2A2B32]"
+                }`}
               >
-                Create new Chat
+                <div className="shrink-0">
+                  <MessageIcon />
+                </div>
+                <span className="truncate">{item.title}</span>
               </button>
-            </div>
-            <div className="flex w-full items-center gap-4 p-2">
-              <textarea
-                rows={3}
-                value={promptInput}
-                onChange={(e) => setPromptInput(e.target.value)}
-                placeholder="Ask anything"
-                className="w-full rounded-xl border border-neutral-600 bg-neutral-900 px-4 py-4 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-              />
-              <button
-                className="cursor-pointer rounded-xl bg-gray-700 p-3 hover:bg-gray-500"
-                onClick={handleSendMsg}
-              >
-                Send
-              </button>
-            </div>
-            {loading && (
-              <div className="absolute bottom-30 left-1/2 -translate-1/2 transform text-sm">
-                loading ....
-              </div>
-            )}
+            ))}
           </div>
         </div>
       </div>
-    </>
+
+      <div className="flex h-full min-w-0 flex-1 flex-col bg-[#212121]">
+        <div className="flex h-14 shrink-0 items-center justify-between border-b border-white/10 px-4 md:hidden">
+          <button
+            onClick={handleCreateNew}
+            className="text-gray-300 transition-colors hover:text-white"
+          >
+            <PlusIcon />
+          </button>
+          <span className="text-sm font-medium text-gray-300">AI Chat</span>
+          <div className="w-5" />
+        </div>
+
+        <div className="custom-scrollbar relative flex-1 overflow-y-auto">
+          <Chat chatId={chatId} messages={messages} setMessages={setMessages} />
+        </div>
+
+        <div className="w-full shrink-0 bg-linear-to-t from-[#212121] via-[#212121] to-transparent px-4 pt-4 pb-6 md:px-0">
+          <div className="relative mx-auto w-full max-w-3xl">
+            <div className="relative flex w-full items-end gap-2 rounded-3xl bg-[#2f2f2f] p-2 pr-3 shadow-[0_0_15px_rgba(0,0,0,0.1)] ring-1 ring-white/10 transition-all focus-within:ring-white/30">
+              <textarea
+                rows={1}
+                style={{ minHeight: "44px", maxHeight: "200px" }}
+                value={promptInput}
+                onChange={(e) => {
+                  e.target.style.height = "auto";
+                  e.target.style.height = e.target.scrollHeight + "px";
+                  setPromptInput(e.target.value);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSendMsg();
+                  }
+                }}
+                placeholder="Ask anything..."
+                className="custom-scrollbar w-full resize-none bg-transparent px-4 py-3 text-white placeholder:text-sm placeholder:text-gray-400 focus:outline-none"
+              />
+              <button
+                className={`mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors ${
+                  promptInput.trim() && !loading
+                    ? "bg-white text-black hover:bg-gray-200"
+                    : "cursor-not-allowed bg-[#404040] text-gray-500"
+                }`}
+                onClick={handleSendMsg}
+                disabled={!promptInput.trim() || loading}
+              >
+                {loading ? <LoadingSpinner /> : <SendIcon />}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 };
 
@@ -224,10 +255,11 @@ export const Chat = ({
   messages: Message[];
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
 }) => {
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     const fetchChat = async (chatId: string) => {
       try {
-        console.log(chatId);
         const response = await fetch(
           `http://localhost:3000/api/chat/${chatId}`,
           {
@@ -238,40 +270,63 @@ export const Chat = ({
           throw new Error("Something went wrong");
         }
         const data = await response.json();
-
         setMessages(data.data.messages);
       } catch (error) {
-        console.log(error);
+        console.log("Error fetching chat:", error);
       }
     };
 
     if (chatId) {
       fetchChat(chatId);
     }
-  }, [chatId]);
+  }, [chatId, setMessages]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  if (messages.length === 0) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center p-4 text-center">
+        <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-white text-black shadow-lg">
+          <SparklesIcon />
+        </div>
+        <h1 className="text-3xl font-semibold text-white/90 md:text-4xl">
+          How can I help you today?
+        </h1>
+      </div>
+    );
+  }
 
   return (
-    <>
-      <div className="flex-1 space-y-3 overflow-y-auto p-4">
-        {messages.map((msg, idx) => (
-          <div
-            key={idx}
-            className={`flex w-full ${msg.role === "USER" ? "justify-end" : "justify-start"}`}
-          >
-            <div
-              className={`max-w-[80%] rounded-xl px-4 py-2 ${
-                msg.role === "USER"
-                  ? "bg-gray-800 text-white"
-                  : "bg-neutral-900 text-white"
-              }`}
-            >
-              <div className="prose prose-sm prose-invert max-w-none">
-                <Markdown remarkPlugins={[remarkGfm]}>{msg.content}</Markdown>
+    <div className="mx-auto flex w-full max-w-3xl flex-col space-y-6 p-4 pb-4 md:p-6">
+      {messages.map((msg, idx) => (
+        <div
+          key={idx}
+          className={`flex w-full ${msg.role === "USER" ? "justify-end" : "justify-start"}`}
+        >
+          {msg.role === "USER" ? (
+            <div className="wrap-break-words max-w-[85%] rounded-3xl bg-[#2f2f2f] px-5 py-3.5 text-[15px] leading-relaxed text-white/90 md:max-w-[75%]">
+              {msg.content}
+            </div>
+          ) : (
+            <div className="flex w-full max-w-3xl gap-4">
+              <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-black">
+                <SparklesIcon />
+              </div>
+              <div className="prose prose-invert prose-p:leading-relaxed prose-pre:bg-[#1e1e1e] prose-pre:border prose-pre:border-white/10 prose-pre:rounded-xl wrap-break-words max-w-none min-w-0 flex-1 text-[15px]">
+                <Markdown
+                  remarkPlugins={[remarkGfm]}
+                  rehypePlugins={[rehypeHighlight]}
+                >
+                  {msg.content || "..."}
+                </Markdown>
               </div>
             </div>
-          </div>
-        ))}
-      </div>
-    </>
+          )}
+        </div>
+      ))}
+      <div ref={messagesEndRef} className="h-4" />
+    </div>
   );
 };
