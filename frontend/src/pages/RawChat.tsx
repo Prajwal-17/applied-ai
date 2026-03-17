@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -10,10 +10,17 @@ type Message = {
   content: string;
 };
 
+type Title = {
+  id: string;
+  title: string;
+};
+
 export const RawChat = () => {
   const [promptInput, setPromptInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [chatId, setChatId] = useState<string | null>(null);
+  const [titles, setTitles] = useState<Title[]>([]);
 
   const handleSendMsg = async () => {
     try {
@@ -36,7 +43,7 @@ export const RawChat = () => {
           "Content-type": "application/json",
         },
         body: JSON.stringify({
-          role: "user",
+          id: chatId,
           prompt: promptInput,
         }),
       });
@@ -126,59 +133,61 @@ export const RawChat = () => {
     }
   };
 
+  const handleCreateNew = () => {
+    setMessages([]);
+    setChatId(null);
+  };
+
   useEffect(() => {
-    const fetchChat = async () => {
-      try {
-        const response = await fetch(
-          "http://localhost:3000/api/chat/8c12caea-938c-4b92-a2d0-02d125e2c698",
-          {
-            method: "GET",
-          },
-        );
-        if (!response.ok) {
-          throw new Error("Something went wrong");
-        }
+    async function getChatTitles() {
+      const response = await fetch("http://localhost:3000/api/chats", {
+        method: "GET",
+      });
+      if (response.ok) {
         const data = await response.json();
-
-        setMessages(data.data.messages);
-      } catch (error) {
-        console.log(error);
+        setTitles(data.titles);
       }
-    };
+    }
 
-    fetchChat();
+    getChatTitles();
   }, []);
 
   return (
     <>
       <div className="flex h-screen w-full flex-col bg-black px-4 py-4 text-white">
         <h1 className="mb-4 text-4xl font-semibold">Ai chat app</h1>
+        <div>
+          {titles.map((item, idx) => (
+            <div
+              key={idx}
+              onClick={() => {
+                setChatId(item.id);
+              }}
+              className="group space-x-2"
+            >
+              <span> =&gt; </span>
+              <span className="cursor-pointer group-hover:underline">
+                {item.title}
+              </span>
+            </div>
+          ))}
+        </div>
 
         <div className="flex flex-1 flex-col items-center justify-center overflow-hidden">
           <div className="relative flex h-full w-full max-w-3xl flex-col">
-            <div className="flex-1 space-y-3 overflow-y-auto p-4">
-              {messages.map((msg, idx) => (
-                <div
-                  key={idx}
-                  className={`flex w-full ${msg.role === "USER" ? "justify-end" : "justify-start"}`}
-                >
-                  <div
-                    className={`max-w-[80%] rounded-xl px-4 py-2 ${
-                      msg.role === "USER"
-                        ? "bg-gray-800 text-white"
-                        : "bg-neutral-900 text-white"
-                    }`}
-                  >
-                    <div className="prose prose-sm prose-invert max-w-none">
-                      <Markdown remarkPlugins={[remarkGfm]}>
-                        {msg.content}
-                      </Markdown>
-                    </div>
-                  </div>
-                </div>
-              ))}
+            <Chat
+              chatId={chatId}
+              messages={messages}
+              setMessages={setMessages}
+            />
+            <div>
+              <button
+                onClick={handleCreateNew}
+                className="rounded-xl bg-gray-900 px-4 py-2 text-white hover:cursor-pointer hover:bg-gray-800"
+              >
+                Create new Chat
+              </button>
             </div>
-
             <div className="flex w-full items-center gap-4 p-2">
               <textarea
                 rows={3}
@@ -201,6 +210,67 @@ export const RawChat = () => {
             )}
           </div>
         </div>
+      </div>
+    </>
+  );
+};
+
+export const Chat = ({
+  chatId,
+  messages,
+  setMessages,
+}: {
+  chatId: string | null;
+  messages: Message[];
+  setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
+}) => {
+  useEffect(() => {
+    const fetchChat = async (chatId: string) => {
+      try {
+        console.log(chatId);
+        const response = await fetch(
+          `http://localhost:3000/api/chat/${chatId}`,
+          {
+            method: "GET",
+          },
+        );
+        if (!response.ok) {
+          throw new Error("Something went wrong");
+        }
+        const data = await response.json();
+
+        setMessages(data.data.messages);
+      } catch (error) {
+        console.log(error);
+      }
+    };
+
+    if (chatId) {
+      fetchChat(chatId);
+    }
+  }, [chatId]);
+
+  return (
+    <>
+      <div className="flex-1 space-y-3 overflow-y-auto p-4">
+        {messages.map((msg, idx) => (
+          <div
+            key={idx}
+            className={`flex w-full ${msg.role === "USER" ? "justify-end" : "justify-start"}`}
+          >
+            <div
+              className={`max-w-[80%] rounded-xl px-4 py-2 ${
+                msg.role === "USER"
+                  ? "bg-gray-800 text-white"
+                  : "bg-neutral-900 text-white"
+              }`}
+            >
+              <div className="prose prose-sm prose-invert max-w-none">
+                <Markdown remarkPlugins={[remarkGfm]}>{msg.content}</Markdown>
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
     </>
   );
