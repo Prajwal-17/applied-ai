@@ -26,6 +26,8 @@
     "typescript": "^5.9.3"
   },
   "devDependencies": {
+    "@repo/typescript-config": "workspace:*",
+    "@repo/eslint-config": "workspace:*",
     "@types/node": "^24.10.0",
     "@types/pg": "^8.16.0",
     "nodemon": "^3.1.11",
