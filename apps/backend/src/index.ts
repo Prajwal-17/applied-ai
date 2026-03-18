@@ -3,6 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import express, { type Request, type Response } from "express";
 import fs from "fs";
+import pgvector from "pgvector";
 import { prisma } from "./lib/prisma.js";
 
 dotenv.config();
@@ -40,6 +41,52 @@ app.use((req, res, next) => {
 app.get("/", (req: Request, res: Response) => {
   res.json({ status: "success" }).status(200);
 });
+
+app.get("/embed", async (req: Request, res: Response) => {
+  try {
+    const dummyVector = Array(1536).fill(0.1);
+    const embeddingSql = pgvector.toSql(dummyVector);
+
+    // Pass gen_random_uuid() for the id column
+    const result = await prisma.$executeRaw`
+      INSERT INTO "Item" (id, embedding)
+      VALUES (gen_random_uuid(), ${embeddingSql}::vector)
+    `;
+
+    console.log(result);
+    res.send("Saved");
+  } catch (error) {
+    console.log(error);
+  }
+});
+
+// app.get("/embed", async (req: Request, res: Response) => {
+//   try {
+//     // const embedding1 = pgvector.toSql([2, 3, 5]);
+//     // const embedding2 = pgvector.toSql([6, 3, 5]);
+//     // const result = await prisma.$executeRaw`
+//     //   INSERT INTO "Item" (embedding)
+//     //   VALUES (${embedding1}::vector), (${embedding2}::vector)
+//     // `;
+//     // const result = await prisma.$executeRaw`
+//     //   INSERT INTO "Item" (id, embedding)
+//     //   VALUES
+//     //     (gen_random_uuid(), ${JSON.stringify(embedding1)}::vector),
+//     //     (gen_random_uuid(), ${JSON.stringify(embedding2)}::vector)
+//     // `;
+//     const mockVector = new Array(1536).fill(0.1);
+//     const embeddingSql = pgvector.toSql(mockVector);
+
+//     const result = await prisma.$executeRaw`
+//           INSERT INTO "Item" (embedding)
+//           VALUES (${embeddingSql}::vector)
+//         `;
+//     console.log(result);
+//     return res.json({ msg: "Inserted embeddings" }).status(200);
+//   } catch (error) {
+//     console.log(error);
+//   }
+// });
 
 // sse-demo
 app.post("/events-demo", async (req: Request, res: Response) => {

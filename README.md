@@ -27,3 +27,14 @@
 <img alt="splitresult" src="./attachments/SplitResult.png" width="600" />
 - raw binary byte level data
 - Those numbers you're seeing (97, 116, 101, 120, 116, 58, 32, 123, ...) are ASCII/UTF-8 byte values of the incoming text chunks.
+
+```
+docker run --name applied-ai \
+  -e POSTGRES_DB=appliedai \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD=ai \
+  -p 5432:5432 \
+  -v applied-ai-vol:/var/lib/postgresql/data \
+  -d pgvector/pgvector:pg16-trixie
+
+```

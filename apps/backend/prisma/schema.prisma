@@ -5,12 +5,14 @@
 // Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
 
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider        = "prisma-client"
+  previewFeatures = ["postgresqlExtensions"]
+  output          = "../src/generated/prisma"
 }
 
 datasource db {
-  provider = "postgresql"
+  provider   = "postgresql"
+  extensions = [vector]
 }
 
 // model User {
@@ -45,6 +47,11 @@ model Messages {
   createdAt DateTime @default(now())
 
   chat Chats @relation(fields: [chatId], references: [id])
+}
+
+model Item {
+  id        String                       @id @default(uuid())
+  embedding Unsupported("vector(1536)")?
 }
 
 enum Role {
