@@ -38,5 +38,5 @@
     "moduleDetection": "force",
     "skipLibCheck": true,
   },
-  "include": ["src/**/*", "prisma.config.ts"],
+  "include": ["src/**/*", "drizzle.config.ts"],
 }

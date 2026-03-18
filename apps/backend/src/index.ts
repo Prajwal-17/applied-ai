@@ -1,10 +1,11 @@
 import { GoogleGenAI } from "@google/genai";
 import cors from "cors";
 import dotenv from "dotenv";
+import { asc, desc, eq } from "drizzle-orm";
 import express, { type Request, type Response } from "express";
 import fs from "fs";
-import pgvector from "pgvector";
-import { prisma } from "./lib/prisma.js";
+import { db } from "./db/index.js";
+import { chats, items, messages } from "./db/schema.js";
 
 dotenv.config();
 const app = express();
@@ -42,18 +43,15 @@ app.get("/", (req: Request, res: Response) => {
   res.json({ status: "success" }).status(200);
 });
 
-app.get("/embed", async (req: Request, res: Response) => {
+app.get("/embeddings-demo", async (req: Request, res: Response) => {
   try {
     const dummyVector = Array(1536).fill(0.1);
-    const embeddingSql = pgvector.toSql(dummyVector);
+    // const embeddingSql = pgvector.toSql(dummyVector);
 
-    // Pass gen_random_uuid() for the id column
-    const result = await prisma.$executeRaw`
-      INSERT INTO "Item" (id, embedding)
-      VALUES (gen_random_uuid(), ${embeddingSql}::vector)
-    `;
+    await db.insert(items).values({
+      embedding: dummyVector,
+    });
 
-    console.log(result);
     res.send("Saved");
   } catch (error) {
     console.log(error);
@@ -118,12 +116,12 @@ app.post("/events-demo", async (req: Request, res: Response) => {
 // get all chats titles
 app.get("/api/chats", async (req, res) => {
   try {
-    const chatTitles = await prisma.chats.findMany({
-      select: {
-        id: true,
-        title: true,
-      },
-    });
+    const chatTitles = await db
+      .select({
+        id: chats.id,
+        title: chats.title,
+      })
+      .from(chats);
 
     return res.json({ titles: chatTitles }).status(200);
   } catch (error) {
@@ -135,22 +133,19 @@ app.get("/api/chats", async (req, res) => {
 // get chat and its messages
 app.get("/api/chat/:id", async (req: Request, res: Response) => {
   try {
-    const id = req.params.id;
+    const id = req.params.id as string;
 
     if (!id) {
       return res.json({ msg: "Something went wrong" }).status(400);
     }
 
-    const chat = await prisma.chats.findFirst({
-      where: {
-        id: id,
-      },
-      select: {
-        messages: true,
-      },
-    });
+    const chatMessages = await db
+      .select()
+      .from(messages)
+      .where(eq(messages.chatId, id))
+      .orderBy(asc(messages.msgIndex));
 
-    return res.json({ data: chat }).status(200);
+    return res.json({ data: { messages: chatMessages } }).status(200);
   } catch (error) {
     console.log(error);
     return res.status(500);
@@ -179,33 +174,29 @@ app.post("/api/chat/gemini", async (req: Request, res: Response) => {
         return res.json({ msg: "Title could not be generated" }).status(500);
       }
 
-      const chat = await prisma.chats.create({
-        data: {
+      const [chat] = await db
+        .insert(chats)
+        .values({
           title: titleResponse.text,
-        },
-      });
+        })
+        .returning();
 
-      const latestMsgIndex = await prisma.messages.findFirst({
-        where: {
-          id: chat.id,
-        },
-        orderBy: {
-          msgIndex: "desc",
-        },
-        select: { msgIndex: true },
-      });
+      const [latestMsgIndex] = await db
+        .select({ msgIndex: messages.msgIndex })
+        .from(messages)
+        .where(eq(messages.chatId, chat!.id))
+        .orderBy(desc(messages.msgIndex))
+        .limit(1);
 
       const newMsgIndex = latestMsgIndex?.msgIndex
-        ? latestMsgIndex?.msgIndex + 1
+        ? latestMsgIndex.msgIndex + 1
         : 1;
 
-      const newUserMsg = await prisma.messages.create({
-        data: {
-          role: "USER",
-          msgIndex: newMsgIndex,
-          chatId: chat.id,
-          content: prompt,
-        },
+      await db.insert(messages).values({
+        role: "USER",
+        msgIndex: newMsgIndex,
+        chatId: chat!.id,
+        content: prompt,
       });
 
       let aiResponse = "";
@@ -224,13 +215,11 @@ app.post("/api/chat/gemini", async (req: Request, res: Response) => {
         }
       }
 
-      const newMessage = await prisma.messages.create({
-        data: {
-          chatId: chat.id,
-          role: "AI",
-          msgIndex: newMsgIndex + 1,
-          content: aiResponse,
-        },
+      await db.insert(messages).values({
+        chatId: chat!.id,
+        role: "AI",
+        msgIndex: newMsgIndex + 1,
+        content: aiResponse,
       });
 
       res.write(`data:[DONE]\n\n`);
@@ -238,37 +227,32 @@ app.post("/api/chat/gemini", async (req: Request, res: Response) => {
       return;
     }
 
-    const existingChat = await prisma.chats.findFirst({
-      where: {
-        id: id,
-      },
-    });
+    const [existingChat] = await db
+      .select()
+      .from(chats)
+      .where(eq(chats.id, id))
+      .limit(1);
 
     if (!existingChat?.id) {
       return res.json({ msg: `Chat does not exist:${id}` }).status(400);
     }
 
-    const latestMsgIndex = await prisma.messages.findFirst({
-      where: {
-        chatId: existingChat.id,
-      },
-      orderBy: {
-        msgIndex: "desc",
-      },
-      select: { msgIndex: true },
-    });
+    const [latestMsgIndex] = await db
+      .select({ msgIndex: messages.msgIndex })
+      .from(messages)
+      .where(eq(messages.chatId, existingChat.id))
+      .orderBy(desc(messages.msgIndex))
+      .limit(1);
 
     const newMsgIndex = latestMsgIndex?.msgIndex
-      ? latestMsgIndex?.msgIndex + 1
+      ? latestMsgIndex.msgIndex + 1
       : 1;
 
-    const newUserMsg = await prisma.messages.create({
-      data: {
-        role: "USER",
-        msgIndex: newMsgIndex,
-        chatId: existingChat.id,
-        content: prompt,
-      },
+    await db.insert(messages).values({
+      role: "USER",
+      msgIndex: newMsgIndex,
+      chatId: existingChat.id,
+      content: prompt,
     });
 
     let aiResponse = "";
@@ -287,13 +271,11 @@ app.post("/api/chat/gemini", async (req: Request, res: Response) => {
       }
     }
 
-    const newMessage = await prisma.messages.create({
-      data: {
-        chatId: existingChat.id,
-        role: "AI",
-        msgIndex: newMsgIndex + 1,
-        content: aiResponse,
-      },
+    await db.insert(messages).values({
+      chatId: existingChat.id,
+      role: "AI",
+      msgIndex: newMsgIndex + 1,
+      content: aiResponse,
     });
 
     res.write(`data:[DONE]\n\n`);
@@ -340,37 +322,33 @@ app.post("/api/chat/openrouter", async (req: Request, res: Response) => {
       const newTitleText =
         titleData.choices?.[0]?.message?.content || prompt.slice(0, 30);
 
-      const chat = await prisma.chats.create({
-        data: {
+      const [chat] = await db
+        .insert(chats)
+        .values({
           title: newTitleText,
-        },
-      });
+        })
+        .returning();
 
-      if (!chat.id) {
+      if (!chat?.id) {
         return res.json({ msg: "New Chat could not create" }).status(500);
       }
 
-      const latestMsgIndex = await prisma.messages.findFirst({
-        where: {
-          id: chat.id,
-        },
-        orderBy: {
-          msgIndex: "desc",
-        },
-        select: { msgIndex: true },
-      });
+      const [latestMsgIndex] = await db
+        .select({ msgIndex: messages.msgIndex })
+        .from(messages)
+        .where(eq(messages.chatId, chat!.id))
+        .orderBy(desc(messages.msgIndex))
+        .limit(1);
 
       const newMsgIndex = latestMsgIndex?.msgIndex
-        ? latestMsgIndex?.msgIndex + 1
+        ? latestMsgIndex.msgIndex + 1
         : 1;
 
-      await prisma.messages.create({
-        data: {
-          role: "USER",
-          msgIndex: newMsgIndex,
-          chatId: chat.id,
-          content: prompt,
-        },
+      await db.insert(messages).values({
+        role: "USER",
+        msgIndex: newMsgIndex,
+        chatId: chat!.id,
+        content: prompt,
       });
 
       let aiResponse = "";
@@ -431,13 +409,11 @@ app.post("/api/chat/openrouter", async (req: Request, res: Response) => {
         }
       }
 
-      await prisma.messages.create({
-        data: {
-          chatId: chat.id,
-          role: "AI",
-          msgIndex: newMsgIndex + 1,
-          content: aiResponse,
-        },
+      await db.insert(messages).values({
+        chatId: chat.id,
+        role: "AI",
+        msgIndex: newMsgIndex + 1,
+        content: aiResponse,
       });
 
       res.write(`data:[DONE]\n\n`);
@@ -445,55 +421,43 @@ app.post("/api/chat/openrouter", async (req: Request, res: Response) => {
       return;
     }
 
-    const existingChat = await prisma.chats.findFirst({
-      where: {
-        id: id,
-      },
-    });
+    const [existingChat] = await db
+      .select()
+      .from(chats)
+      .where(eq(chats.id, id))
+      .limit(1);
 
     if (!existingChat?.id) {
       return res.json({ msg: `Chat does not exist:${id}` }).status(400);
     }
 
-    const prevMessages = await prisma.messages.findMany({
-      where: {
-        chatId: existingChat.id,
-      },
-      select: {
-        role: true,
-        content: true,
-      },
-      orderBy: {
-        msgIndex: "asc",
-      },
-    });
+    const prevMessages = await db
+      .select({ role: messages.role, content: messages.content })
+      .from(messages)
+      .where(eq(messages.chatId, existingChat.id))
+      .orderBy(asc(messages.msgIndex));
 
-    const openRouterMessages = prevMessages.map((msg) => ({
+    const openRouterMessages = prevMessages.map((msg: any) => ({
       role: msg.role === "USER" ? "user" : "assistant",
       content: msg.content,
     }));
 
-    const latestMsgIndex = await prisma.messages.findFirst({
-      where: {
-        chatId: existingChat.id,
-      },
-      orderBy: {
-        msgIndex: "desc",
-      },
-      select: { msgIndex: true },
-    });
+    const [latestMsgIndex] = await db
+      .select({ msgIndex: messages.msgIndex })
+      .from(messages)
+      .where(eq(messages.chatId, existingChat.id))
+      .orderBy(desc(messages.msgIndex))
+      .limit(1);
 
     const newMsgIndex = latestMsgIndex?.msgIndex
-      ? latestMsgIndex?.msgIndex + 1
+      ? latestMsgIndex.msgIndex + 1
       : 1;
 
-    await prisma.messages.create({
-      data: {
-        role: "USER",
-        msgIndex: newMsgIndex,
-        chatId: existingChat.id,
-        content: prompt,
-      },
+    await db.insert(messages).values({
+      role: "USER",
+      msgIndex: newMsgIndex,
+      chatId: existingChat.id,
+      content: prompt,
     });
 
     let aiResponse = "";
@@ -555,13 +519,11 @@ app.post("/api/chat/openrouter", async (req: Request, res: Response) => {
       }
     }
 
-    await prisma.messages.create({
-      data: {
-        chatId: existingChat.id,
-        role: "AI",
-        msgIndex: newMsgIndex + 1,
-        content: aiResponse,
-      },
+    await db.insert(messages).values({
+      chatId: existingChat.id,
+      role: "AI",
+      msgIndex: newMsgIndex + 1,
+      content: aiResponse,
     });
 
     res.write(`data:[DONE]\n\n`);
