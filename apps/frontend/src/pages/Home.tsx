@@ -39,6 +39,11 @@ export const Home = () => {
                     Vercel AI SDK Chat
                   </Link>
                 </li>
+                <li>
+                  <Link to="/rag" className="text-green-600 font-semibold hover:underline">
+                    RAG Vector Search
+                  </Link>
+                </li>
               </ul>
             </div>
           </div>

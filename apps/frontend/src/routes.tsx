@@ -5,6 +5,7 @@ import { Demo } from "./pages/Demo";
 import { Home } from "./pages/Home";
 import { RawChat } from "./pages/RawChat";
 import { Response } from "./pages/Response";
+import { Rag } from "./pages/Rag";
 
 export const router = createBrowserRouter([
   {
@@ -30,6 +31,10 @@ export const router = createBrowserRouter([
       {
         path: "/aisdk/chat",
         element: <AiSDK />,
+      },
+      {
+        path: "/rag",
+        element: <Rag />,
       },
     ],
   },

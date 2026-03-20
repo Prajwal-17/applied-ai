@@ -9,21 +9,6 @@ import {
 
 export const roleEnum = pgEnum("Role", ["AI", "USER"]);
 
-// export const vector = customType<{ data: number[] }>({
-//   dataType() {
-//     return "vector(1536)";
-//   },
-//   toDriver(value: number[]) {
-//     return `[${value.join(",")}]`;
-//   },
-//   fromDriver(value: unknown) {
-//     if (typeof value === "string") {
-//       return JSON.parse(value);
-//     }
-//     return value as number[];
-//   },
-// });
-
 export const chats = pgTable("Chats", {
   id: text("id")
     .primaryKey()
@@ -57,9 +42,23 @@ export const messages = pgTable("Messages", {
     .notNull(),
 });
 
-export const items = pgTable("Item", {
+// schema applicable only for pdfs
+export const items = pgTable("Items", {
   id: text("id")
     .primaryKey()
     .$defaultFn(() => crypto.randomUUID()),
-  embedding: vector("embedding", { dimensions: 1536 }),
+  type: text("type"),
+  name: text("name"),
+});
+
+export const itemDetails = pgTable("Item_Details", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  itemId: text("item_id")
+    .references(() => items.id, { onDelete: "cascade" })
+    .notNull(),
+  textChunk: text("text_chunk"),
+  pageNo: integer("page_no"),
+  embedding: vector("embedding", { dimensions: 3072 }),
 });
