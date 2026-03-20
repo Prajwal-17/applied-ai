@@ -53,20 +53,17 @@ export const Rag = () => {
         },
       ]);
 
-      const response = await fetch(
-        `http://localhost:3000/api/rag/chat`,
-        {
-          method: "POST",
-          headers: {
-            Accept: "text/event-stream",
-            "Content-type": "application/json",
-          },
-          body: JSON.stringify({
-            id: chatId,
-            prompt: currentPrompt,
-          }),
+      const response = await fetch(`http://localhost:3000/api/chat/rag`, {
+        method: "POST",
+        headers: {
+          Accept: "text/event-stream",
+          "Content-type": "application/json",
         },
-      );
+        body: JSON.stringify({
+          id: chatId,
+          prompt: currentPrompt,
+        }),
+      });
 
       if (!response.ok) {
         throw new Error("Something went wrong");
@@ -145,7 +142,7 @@ export const Rag = () => {
         });
         if (response.ok) {
           const data = await response.json();
-          setTitles(data.titles);
+          setTitles(data.titles || []);
         }
       } catch (error) {
         console.log("Failed to fetch chat titles", error);
@@ -273,7 +270,7 @@ export const Chat = ({
           throw new Error("Something went wrong");
         }
         const data = await response.json();
-        setMessages(data.data.messages);
+        setMessages(data.data?.messages || []);
       } catch (error) {
         console.log("Error fetching chat:", error);
       }
@@ -297,7 +294,9 @@ export const Chat = ({
         <h1 className="text-3xl font-semibold text-white/90 md:text-4xl">
           RAG Vector Search Ready
         </h1>
-        <p className="mt-4 text-gray-400">Ask questions about your uploaded documents.</p>
+        <p className="mt-4 text-gray-400">
+          Ask questions about your uploaded documents.
+        </p>
       </div>
     );
   }

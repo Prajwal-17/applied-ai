@@ -15,6 +15,20 @@
       "when": 1773948465155,
       "tag": "0001_classy_richard_fisk",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1774015047188,
+      "tag": "0002_handy_wiccan",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1774017788321,
+      "tag": "0003_hot_meltdown",
+      "breakpoints": true
     }
   ]
 }
